@@ -1,0 +1,70 @@
+A. Incident Response Evaluation
+A1. Actions Taken in Response to the Incident
+Action 1: Detection: The centralized IDS flagged unusual outbound traffic from the infected HR workstation (10.1.1.45) at 09:52 on 06/24/2025, approximately 38 minutes after the malicious PDF attachment was opened and the GhostX RAT silently installed at 09:14.
+Action 2: Containment: At 10:07, roughly 15 minutes after the IDS alert, the affected machine was isolated from the network by turning off its network port, consistent with the organization's documented containment step.
+Action 3: Eradication and Recovery: The malware was identified as the GhostX RAT at 11:25. At 13:45, the endpoint was restored from backup, and antivirus scans were initiated across the HR subnet; the following morning at 08:30, antivirus definitions were updated across all endpoints organization wide.
+A2. Effectiveness Evaluation (NIST SP 800-61 Incident Response Lifecycle)
+The National Institute of Standards and Technology's incident handling guide, NIST SP 800-61, Revision 2, organizes incident response into four phases: Preparation; Detection and Analysis; Containment, Eradication, and Recovery; and Post-Incident Activity (NIST, 2012). Each action from A1 is evaluated against this framework below.
+Detection: Partially Effective
+The 38-minute gap between infection and detection demonstrates that the IDS was able to identify the resulting outbound traffic within the same operational period (NIST, 2012). However, the IDS alert log shows the compromise was not fully characterized at the point of detection: an external port scan against the internal Finance subnet (162.155.10.102 → 10.1.2.4) was logged at 10:14, lateral movement via SMB to the Finance subnet (10.1.1.45 → 10.1.2.10) was logged at 10:45, and a suspicious DNS query to a known-malicious domain was logged the following morning at 08:02, nearly 24 hours after the incident began. Detection caught the initial outbound C2 traffic but did not drive a full-scope analysis of everything that traffic touched, so its effectiveness was incomplete.
+Containment: Partially Effective
+Isolating the infected workstation within 15 minutes of the alert reflects a fast, well-executed initial containment step, consistent with NIST SP 800-61 guidance to limit the damage of an incident as quickly as possible (NIST, 2012). Its scope, however, was too narrow: containment addressed only the originally identified HR workstation and did not extend to the Finance-subnet host (10.1.2.10) that IDS logs show was reached via lateral SMB movement around the same time containment occurred. A host that was already compromised was left connected to the network.
+Eradication and Recovery: Partially Effective
+Restoring the endpoint from a backup and scanning the HR subnet show that the organization took reasonable steps to remove the known threat and restore service, in line with the Eradication and Recovery phase of NIST SP 800-61 (NIST, 2012). Two gaps limit its effectiveness: antivirus scanning was limited to the HR subnet even though IDS evidence already showed lateral movement into the Finance subnet, and updated antivirus definitions were not pushed to all endpoints until nearly 24 hours after the initial infection, leaving other endpoints exposed to the same threat signature during that window.
+A3. Recommended Improvements
+Recommendation 1: Expand containment and eradication scope to every host implicated by IDS evidence, not just the point of initial detection. When lateral movement or C2 activity is identified, all involved hosts, including the Finance-subnet host reached via SMB, should be isolated and scanned in the same response cycle as the original host.
+Justification: NIST SP 800-61, Revision 2, specifies that organizations should identify all affected hosts before considering containment complete, because addressing only the entry point allows an incident to reignite or continue spreading from an unaddressed compromised system (NIST, 2012). This directly closes the gap identified in the Containment and Eradication evaluations above.
+Recommendation 2: Require a formal post-incident review for every confirmed security incident, regardless of how many departments it appears to affect, and use each review to update detection content, for example, blocklisting the confirmed C2 destination and malicious domain, and tuning IDS rules to flag SMB traffic crossing subnet boundaries.
+Justification: The current procedure schedules a debrief “only if the threat affects multiple departments,” which conflicts with the Post-Incident Activity phase of NIST SP 800-61, which calls for a lessons-learned review after every incident to improve detection and response capabilities over time (NIST, 2012). Making review mandatory removes the risk that a future single-department incident is never reviewed, and ensures the indicators from this incident are converted into lasting detection improvements.
+B. Network Architecture Analysis
+The simplified network architecture diagram provided in the artifact is reproduced below for reference.
+ 
+B1. Identified Vulnerabilities and Design Flaws
+Vulnerability 1: No DMZ for internet-facing servers
+The Web Server and Mail Server sit on the same network segment as the internal Switch, directly off the Firewall/IDS, with no separate demilitarized zone (DMZ) shown. Both systems must accept unsolicited traffic from the internet (per Rules 100 and 101), so if either is compromised, the attacker lands on the same segment that leads straight into the internal LAN, with no isolation layer in between.
+Vulnerability 2: No internal network segmentation between subnets
+The HR Subnet (10.1.1.x) and Finance Subnet (10.1.2.x) both connect to the same switch with no VLAN boundary or access-control layer visible between them. This flat design, combined with Firewall Rule 102 (“Any → Internal networks, Any, Allow”), means a compromised host on one subnet can reach hosts on the other subnet without restriction, exactly what the IDS log shows occurred when 10.1.1.45 (HR) reached 10.1.2.10 (Finance) via SMB.
+Vulnerability 3: Exposed firewall management interface
+Rule 104 allows “Any” source to reach the Firewall console on port 8080. This exposes the administrative interface of the organization's core security control to the entire internet. If an attacker gained access to this console, they could disable or reconfigure the firewall itself, undermining every other control on the network.
+B2 & B3. Recommendations, Justification, and CIA / Threat-Resistance Impact
+For Vulnerability 1 (No DMZ)
+Recommendation: Place the Web Server and Mail Server in a dedicated DMZ segment, isolated from the internal LAN by the firewall, with rules permitting only the specific inbound ports required (443, 25) and no direct DMZ-to-internal-LAN access except through tightly controlled, logged relay rules.
+Justification: NIST SP 800-53, Revision 5, control SC-7 (Boundary Protection) calls for managed interfaces, including DMZs, to control connections between internal and external network segments (NIST, 2020).
+CIA / threat-resistance impact: A DMZ contains the blast radius of a compromised public-facing server, protecting the confidentiality and integrity of HR and Finance data by removing the direct path a compromised Web or Mail Server would otherwise have into internal subnets, and it supports availability by preventing an externally triggered compromise from cascading into internal systems.
+For Vulnerability 2 (No segmentation)
+Recommendation: Implement VLAN segmentation between the HR and Finance subnets enforced by firewall or Layer 3 ACLs that deny inter-subnet traffic by default, permitting only specific, documented, and logged flows, replacing the current “Any → Internal networks, Any, Allow” rule.
+Justification: CIS Critical Security Control 12 (Network Infrastructure Management) calls for network architecture to be actively managed and segmented to limit the reach of a compromised host (CIS, 2021).
+CIA/threat-resistance impact: Segmentation directly improves the network's ability to resist and contain lateral movement, the exact technique used in this incident, and protects the confidentiality and integrity of Finance-subnet data by preventing an HR-subnet compromise from spreading, while supporting availability by keeping the incident's operational impact contained to a single subnet.
+For Vulnerability 3 (Exposed firewall console)
+Recommendation: Restrict administrative access to the firewall console to a dedicated internal management network, reachable only from designated administrator workstations, with multifactor authentication required; remove the “Any” source rule entirely.
+Justification: NIST SP 800-53 controls AC-17 (Remote Access) and SC-7 (Boundary Protection) both call for strict limits on exposure of management interfaces to general network traffic (NIST, 2020).
+CIA/threat-resistance impact: This protects the confidentiality and integrity of the security infrastructure itself, if an attacker reached and altered the firewall configuration, every other control on the network could be bypassed, and it therefore indirectly protects the availability of the entire network, since the firewall is the chokepoint for all traffic in and out.
+C. Firewall and IDS Rule Set Review
+The existing firewall rule set excerpt from the artifact is reproduced below for reference.
+Rule #	Source	Destination	Port/Service	Action
+100	Any	Web server	443 (HTTPS)	Allow
+101	Any	Email server	25 (SMTP)	Allow
+102	Any	Internal networks	Any	Allow
+103	Internal	External	Any	Allow
+104	Any	Firewall console	8080	Allow
+C1 & C2. Identified Weaknesses and How They Enabled Known Threats
+Weakness 1: Overly permissive inbound rule (Rule 102)
+Weakness: Rule 102 allows “Any → Internal networks, Any port, Allow,” meaning traffic from any source to internal networks on any port with no restriction.
+How it enabled a known threat: The IDS alert log shows external host 162.155.10.102 conducting a port scan directly against internal Finance-subnet host 10.1.2.4 at 10:14 on 06/24/2025. Under a properly restricted rule set, an external host should never be able to reach an internal subnet address directly; Rule 102's blanket allowance is what made this reconnaissance possible in the first place.
+Weakness 2: No egress filtering or automatic blocking of malicious traffic (Rule 103 and IDS-only detection)
+Weakness: Rule 103 allows “Internal → External, Any port, Allow” with no restriction on destination or protocol, and the architecture diagram labels the boundary device only as “Firewall/IDS”, an intrusion detection system that logs and alerts but does not itself block traffic.
+How it enabled a known threat: The IDS logged outbound command-and-control traffic from the infected host (10.1.1.45) to 45.33.122.88 at 09:50, correctly identifying it as “Possible GhostX RAT traffic.” Because Rule 103 places no restriction on outbound destinations and the IDS has no enforcement capability, that traffic was detected but never blocked, the same host was still able to generate a suspicious DNS query to a known-malicious domain nearly 24 hours later, on 06/25 at 08:02, well after the machine had reportedly been contained and restored from backup.
+C3. Proposed Firewall/IDS Rule Updates
+Rule	Source	Destination	Port/Service	Action
+102 (Revised)	Any (external)	Internal networks (10.1.1.0/24, 10.1.2.0/24)	Any: except established/related replies to internal-initiated sessions	Deny (default deny inbound; explicit allow only for 100 & 101)
+103 (Revised)	Internal	External: approved destination list only	Approved business ports only; restrict SMTP (25) to designated mail servers or approved destinations; block outbound SMB (445) and unauthorized DNS (53) to non-approved resolvers	Deny by default; Allow only approved flows; auto-block IDS-flagged C2 indicators
+NEW: 105	HR subnet (10.1.1.0/24)	Finance subnet (10.1.2.0/24)	Any (esp. 445/SMB)	Deny (block east-west lateral movement between subnets by default)
+NEW: 106	Internal	45.33.122.88 and IDS-confirmed malicious indicators	Any	Deny + Alert (blocklist confirmed C2/malicious destinations)
+Rule 102 (Revised) and new Rule 105: Changing Rule 102 to a default-deny inbound posture, paired with a new rule (105) explicitly denying HR-to-Finance subnet traffic, closes the exact path used for both the external port scan against 10.1.2.4 and the internal SMB lateral movement to 10.1.2.10.
+Justification: This enforces the default-deny principle central to NIST SP 800-53 control SC-7 (NIST, 2020) and CIS Control 12's segmentation guidance (CIS, 2021), and would have blocked both threats identified in C2 at the network layer rather than relying on detection alone.
+Rule 103 (Revised) and new Rule 106: Restricting outbound traffic to an approved destination list, blocking outbound SMB, and adding an explicit deny/alert rule for the confirmed C2 IP address (and any future IDS-confirmed malicious indicator) closes the outbound channel the GhostX RAT used for command-and-control and prevents the same indicator from being reused undetected.
+Justification: This aligns with CIS Control 13 (Network Monitoring and Defense), which calls for actively blocking known-malicious network indicators rather than only logging them (CIS, 2021), and with the containment guidance in NIST SP 800-61, Revision 2, which emphasizes cutting off an attacker's command-and-control channel as a priority containment action (NIST, 2012).
+
+
+
+
